@@ -37,7 +37,7 @@
 
         /* === COVER (like facebook profile) === */
         .cover-photo {
-            background: url('image/doggy.jpeg') center/cover no-repeat;
+            background: url('image/buly.jpeg') center/cover no-repeat;
             height: 180px;
             position: relative;
         }
@@ -742,10 +742,21 @@
             </div>
         </div>
     </div>
+    <div class="modal-overlay" id="addonsModal">
+    <div class="modal-content">
+        <h2 id="addonItemName">Customize</h2>
+        <div id="addonsList"></div>
+
+        <div class="modal-actions">
+            <button class="modal-btn cancel" onclick="closeAddons()">Cancel</button>
+            <button class="modal-btn submit" onclick="confirmAddons()">Add to Cart</button>
+        </div>
+    </div>
+</div>
 
     <script>
         (function() {
-        /*function parseCSV(text) {
+        function parseCSV(text) {
     const rows = [];
     let current = '';
     let insideQuotes = false;
@@ -769,7 +780,18 @@
     row.push(current);
     rows.push(row);
     return rows;
-}*/
+}
+function parseAddons(addonStr) {
+    if (!addonStr) return [];
+
+    return addonStr.split('|').map(a => {
+        const [name, price] = a.split(':');
+        return {
+            name: name.trim(),
+            price: parseFloat(price) || 0
+        };
+    });
+}
             // ---------- CONFIG ----------
             // REPLACE WITH YOUR GOOGLE SHEET PUBLISHED CSV URL
             const SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQsv7V8xsbE4Ttn8OVo7uUnLKJ5eIW0Su6MimtSLkPI6CGWhxVYNrMcFcpflQY5aGzR-rX_fT9kg8Gn/pub?output=csv';
@@ -802,25 +824,94 @@
             const customerAddress = document.getElementById('customerAddress');
 
             let activeCategory = 'All';
+            let selectedItemForAddon = null;
+            function openAddons(item) {
+    selectedItemForAddon = item;
+
+    document.getElementById('addonItemName').textContent = item.name;
+
+    const container = document.getElementById('addonsList');
+    container.innerHTML = '';
+
+    if (!item.addons || item.addons.length === 0) {
+        container.innerHTML = '<p>No addons available</p>';
+    } else {
+        item.addons.forEach((addon, index) => {
+            container.innerHTML += `
+                <label style="display:flex; justify-content:space-between; margin:10px 0;">
+                    <span>
+                        <input type="checkbox" value="${index}">
+                        ${addon.name}
+                    </span>
+                    <span>L.L ${formatLBP(addon.price)}</span>
+                </label>
+            `;
+        });
+    }
+
+    document.getElementById('addonsModal').style.display = 'flex';
+}
+
+function closeAddons() {
+    document.getElementById('addonsModal').style.display = 'none';
+}
+
+function confirmAddons() {
+    if (!selectedItemForAddon) return;
+
+    const checkboxes = document.querySelectorAll('#addonsList input:checked');
+
+    let extraPrice = 0;
+    let addonNames = [];
+
+    checkboxes.forEach(cb => {
+        const addon = selectedItemForAddon.addons[cb.value];
+        extraPrice += addon.price;
+        addonNames.push(addon.name);
+    });
+
+    const id = selectedItemForAddon.id + '-' + addonNames.join(',');
+
+    if (cart[id]) {
+        cart[id].quantity += 1;
+    } else {
+        cart[id] = {
+            id: id,
+            name: selectedItemForAddon.name + (addonNames.length ? ` (${addonNames.join(', ')})` : ''),
+            price: selectedItemForAddon.price + extraPrice,
+            quantity: 1
+        };
+    }
+
+    closeAddons();
+    updateCartUI();
+}
 
             // ---------- fetch from google sheet ----------
             async function loadFromSheet() {
                 try {
                     const resp = await fetch(SHEET_CSV_URL);
                     const csv = await resp.text();
-                    const rows = csv.split('\n').map(r => r.split(',').map(cell => cell.trim()));
+                    const rows = parseCSV(csv);
                     if (rows.length < 2) throw new Error('insufficient rows');
-                    rows.shift(); // remove header
+                    const headers = rows.shift().map(h => h.trim()); // remove header
 
-                    allItems = rows.map((row, idx) => ({
-                        id: `item-${idx}-${Date.now()}`,
-                        category: row[0] || 'Uncategorized',
-                        name: row[1] || 'Dish',
-                        description: row[2] || '',
-                        price: parseFloat(row[3]) || 0,
-                        available: row[4]?.toLowerCase() === 'true' || row[4] === 'TRUE' || row[4] === '1' ? true : false,
-                        imageUrl: row[5] || ''
-                    })).filter(item => item.name !== 'Dish' || item.description);
+                    allItems = rows.map((row, idx) => {
+    const obj = {};
+    headers.forEach((h, i) => obj[h] = row[i]);
+
+    return {
+        id: `item-${idx}-${Date.now()}`,
+        category: obj["Category"] || 'Uncategorized',
+        name: obj["Item Name"] || 'Dish',
+        description: obj["Description"] || '',
+        price: parseFloat(obj["Price"]) || 0,
+        available: obj["Available"]?.toLowerCase() === 'true' || obj["Available"] === '1',
+        imageUrl: obj["Image URL"] ? obj["Image URL"].trim() : '',
+
+        addons: parseAddons(obj["Addons"])
+    };
+}).filter(item => item.name !== 'Dish' || item.description);
 
                     if (allItems.length === 0) allItems = getSampleItems();
                 } catch (e) {
@@ -930,9 +1021,9 @@
                                 <div class="card-title">${item.name}</div>
                                 <div class="card-desc">${item.description}</div>
                                 <div class="card-footer">
-                                    <span class="avail-badge ${availClass}">
+                                    <!--<span class="avail-badge ${availClass}">
                                         ${item.available ? 'in stock' : 'sold out'}
-                                    </span>
+                                    </span>-->
                                     <button class="add-to-cart-btn" data-id="${item.id}" ${!item.available ? 'disabled' : ''}>
                                         <i class="fas fa-cart-plus"></i> Add
                                     </button>
@@ -951,7 +1042,13 @@
     document.querySelectorAll('.add-to-cart-btn:not(:disabled)').forEach(btn => {
         btn.addEventListener('click', (e) => {
             const id = e.currentTarget.dataset.id;
-            addToCart(id);
+            const item = allItems.find(i => i.id === id);
+
+if (item.addons && item.addons.length > 0) {
+    openAddons(item);
+} else {
+    addToCart(id);
+}
         });
     });
 }
@@ -1102,6 +1199,9 @@
             });
 
             loadFromSheet();
+            window.openAddons = openAddons;
+window.closeAddons = closeAddons;
+window.confirmAddons = confirmAddons;
         })();
     </script>
     <!-- Replace SHEET_CSV_URL with your published Google Sheet CSV link.
